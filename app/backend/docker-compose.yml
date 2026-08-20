@@ -6,4 +6,28 @@ services:
     container_name: devops-backend
     ports:
       - "5000:5000"
+    environment:
+      DB_HOST: database
+      DB_PORT: 5432
+      DB_NAME: devopsdb
+      DB_USER: devopsuser
+      DB_PASSWORD: devopspassword
+    depends_on:
+      - database
     restart: unless-stopped
+
+  database:
+    image: postgres:16-alpine
+    container_name: devops-database
+    environment:
+      POSTGRES_DB: devopsdb
+      POSTGRES_USER: devopsuser
+      POSTGRES_PASSWORD: devopspassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

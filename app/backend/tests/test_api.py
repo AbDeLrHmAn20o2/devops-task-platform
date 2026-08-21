@@ -10,12 +10,14 @@ sys.path.insert(
 
 import pytest
 
-from app import app
+from app import app, init_db
 
 
 @pytest.fixture
 def client():
     app.config["TESTING"] = True
+
+    init_db()
 
     with app.test_client() as client:
         yield client
@@ -56,6 +58,8 @@ def test_get_non_existing_task(client):
     response = client.get("/tasks/999999")
 
     assert response.status_code == 404
+
+
 def test_create_task(client):
     response = client.post(
         "/tasks",

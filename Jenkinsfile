@@ -24,7 +24,45 @@ pipeline {
                 '''
             }
         }
+stage('Run Tests') {
+    steps {
+        sh '''
+            docker rm -f ci-postgres 2>/dev/null || true
 
+            docker run -d \
+              --name ci-postgres \
+              -e POSTGRES_DB=devopsdb \
+              -e POSTGRES_USER=devopsuser \
+              -e POSTGRES_PASSWORD=devopspassword \
+              postgres:16-alpine
+
+            echo "Waiting for PostgreSQL..."
+
+            for i in $(seq 1 30); do
+                if docker exec ci-postgres pg_isready \
+                    -U devopsuser \
+                    -d devopsdb >/dev/null 2>&1; then
+                    echo "PostgreSQL is ready"
+                    break
+                fi
+
+                sleep 2
+            done
+
+            docker run --rm \
+              --link ci-postgres:devops-database \
+              -e DB_HOST=devops-database \
+              -e DB_PORT=5432 \
+              -e DB_NAME=devopsdb \
+              -e DB_USER=devopsuser \
+              -e DB_PASSWORD=devopspassword \
+              devops-task-platform-test:ci \
+              python -m pytest
+
+            docker rm -f ci-postgres
+        '''
+    }
+}
 stage('Load Image to Minikube') {
     steps {
         sh '''

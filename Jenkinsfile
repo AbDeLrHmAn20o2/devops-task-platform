@@ -1,4 +1,3 @@
-```groovy
 pipeline {
     agent any
 
@@ -28,75 +27,86 @@ pipeline {
         }
 
         stage('Run Tests') {
-    steps {
-        sh '''
-            set -e
+            steps {
+                sh '''
+                    set -e
 
-            cleanup() {
-                echo "=== Cleaning CI resources ==="
-                docker rm -f ci-postgres 2>/dev/null || true
-                docker network rm ci-network 2>/dev/null || true
+                    cleanup() {
+                        echo "=== Cleaning CI resources ==="
+                        docker rm -f ci-postgres 2>/dev/null || true
+                        docker network rm ci-network 2>/dev/null || true
+                    }
+
+                    trap cleanup EXIT
+
+                    docker rm -f ci-postgres 2>/dev/null || true
+                    docker network rm ci-network 2>/dev/null || true
+
+                    echo "=== Creating CI network ==="
+
+                    docker network create ci-network
+
+                    echo "=== Starting PostgreSQL ==="
+
+                    docker run -d \
+                      --name ci-postgres \
+                      --network ci-network \
+                      -e POSTGRES_DB=devopsdb \
+                      -e POSTGRES_USER=devopsuser \
+                      -e POSTGRES_PASSWORD=devopspassword \
+                      postgres:16-alpine
+
+                    echo "=== Waiting for PostgreSQL ==="
+
+                    POSTGRES_READY=false
+
+                    for i in $(seq 1 30); do
+                        if docker exec ci-postgres pg_isready \
+                            -U devopsuser \
+                            -d devopsdb > /dev/null 2>&1; then
+
+                            echo "PostgreSQL is ready"
+                            POSTGRES_READY=true
+                            break
+                        fi
+
+                        echo "Waiting for PostgreSQL... attempt $i/30"
+                        sleep 2
+                    done
+
+                    if [ "$POSTGRES_READY" != "true" ]; then
+                        echo "PostgreSQL failed to become ready"
+                        docker logs ci-postgres
+                        exit 1
+                    fi
+
+                    echo "=== Testing PostgreSQL DNS ==="
+
+                    docker run --rm \
+                      --network ci-network \
+                      postgres:16-alpine \
+                      pg_isready \
+                      -h ci-postgres \
+                      -p 5432 \
+                      -U devopsuser \
+                      -d devopsdb
+
+                    echo "=== Running pytest ==="
+
+                    docker run --rm \
+                      --network ci-network \
+                      -e DB_HOST=ci-postgres \
+                      -e DB_PORT=5432 \
+                      -e DB_NAME=devopsdb \
+                      -e DB_USER=devopsuser \
+                      -e DB_PASSWORD=devopspassword \
+                      ${TEST_IMAGE} \
+                      python -m pytest
+
+                    echo "=== Tests passed ==="
+                '''
             }
-
-            trap cleanup EXIT
-
-            docker rm -f ci-postgres 2>/dev/null || true
-            docker network rm ci-network 2>/dev/null || true
-
-            echo "=== Creating CI network ==="
-
-            docker network create ci-network
-
-            echo "=== Starting PostgreSQL ==="
-
-            docker run -d \
-              --name ci-postgres \
-              --network ci-network \
-              -e POSTGRES_DB=devopsdb \
-              -e POSTGRES_USER=devopsuser \
-              -e POSTGRES_PASSWORD=devopspassword \
-              postgres:16-alpine
-
-            echo "=== Waiting for PostgreSQL ==="
-
-            for i in $(seq 1 30); do
-                if docker exec ci-postgres pg_isready \
-                    -U devopsuser \
-                    -d devopsdb > /dev/null 2>&1; then
-                    echo "PostgreSQL is ready"
-                    break
-                fi
-
-                echo "Waiting for PostgreSQL... attempt $i/30"
-                sleep 2
-            done
-
-            echo "=== Testing PostgreSQL DNS ==="
-
-            docker run --rm \
-              --network ci-network \
-              postgres:16-alpine \
-              pg_isready \
-              -h ci-postgres \
-              -U devopsuser \
-              -d devopsdb
-
-            echo "=== Running pytest ==="
-
-            docker run --rm \
-              --network ci-network \
-              -e DB_HOST=ci-postgres \
-              -e DB_PORT=5432 \
-              -e DB_NAME=devopsdb \
-              -e DB_USER=devopsuser \
-              -e DB_PASSWORD=devopspassword \
-              devops-task-platform-test:ci \
-              python -m pytest
-
-            echo "=== Tests passed ==="
-        '''
-    }
-}
+        }
 
         stage('Build Production Image') {
             steps {
@@ -111,6 +121,8 @@ pipeline {
         stage('Load Image to Minikube') {
             steps {
                 sh '''
+                    echo "=== Checking image in Minikube ==="
+
                     docker exec minikube crictl images | grep ${IMAGE_NAME} || true
                 '''
             }
@@ -119,10 +131,19 @@ pipeline {
         stage('Deploy PostgreSQL') {
             steps {
                 sh '''
-                    kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/postgres-secret.yaml
-                    kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/postgres-pvc.yaml
-                    kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/postgres-deployment.yaml
-                    kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/postgres-service.yaml
+                    echo "=== Deploying PostgreSQL ==="
+
+                    kubectl --kubeconfig=${KUBECONFIG} apply \
+                      -f k8s/postgres-secret.yaml
+
+                    kubectl --kubeconfig=${KUBECONFIG} apply \
+                      -f k8s/postgres-pvc.yaml
+
+                    kubectl --kubeconfig=${KUBECONFIG} apply \
+                      -f k8s/postgres-deployment.yaml
+
+                    kubectl --kubeconfig=${KUBECONFIG} apply \
+                      -f k8s/postgres-service.yaml
                 '''
             }
         }
@@ -130,8 +151,13 @@ pipeline {
         stage('Deploy Backend') {
             steps {
                 sh '''
-                    kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend-deployment.yaml
-                    kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend-service.yaml
+                    echo "=== Deploying Backend ==="
+
+                    kubectl --kubeconfig=${KUBECONFIG} apply \
+                      -f k8s/backend-deployment.yaml
+
+                    kubectl --kubeconfig=${KUBECONFIG} apply \
+                      -f k8s/backend-service.yaml
                 '''
             }
         }
@@ -139,10 +165,24 @@ pipeline {
         stage('Verify Deployment') {
             steps {
                 sh '''
-                    kubectl --kubeconfig=${KUBECONFIG} rollout status deployment/postgres --timeout=120s
-                    kubectl --kubeconfig=${KUBECONFIG} rollout status deployment/backend --timeout=120s
+                    echo "=== Waiting for PostgreSQL rollout ==="
+
+                    kubectl --kubeconfig=${KUBECONFIG} rollout status \
+                      deployment/postgres \
+                      --timeout=120s
+
+                    echo "=== Waiting for Backend rollout ==="
+
+                    kubectl --kubeconfig=${KUBECONFIG} rollout status \
+                      deployment/backend \
+                      --timeout=120s
+
+                    echo "=== Kubernetes Pods ==="
 
                     kubectl --kubeconfig=${KUBECONFIG} get pods
+
+                    echo "=== Kubernetes Services ==="
+
                     kubectl --kubeconfig=${KUBECONFIG} get services
                 '''
             }
@@ -151,8 +191,12 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh '''
+                    echo "=== Backend Health Check ==="
+
                     kubectl --kubeconfig=${KUBECONFIG} exec deployment/backend -- \
                       python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:5000/health').read().decode())"
+
+                    echo "=== Database Health Check ==="
 
                     kubectl --kubeconfig=${KUBECONFIG} exec deployment/backend -- \
                       python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:5000/db-health').read().decode())"
@@ -171,4 +215,3 @@ pipeline {
         }
     }
 }
-```

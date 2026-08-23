@@ -1,0 +1,31 @@
+---
+- name: Configure DevOps Server
+  hosts: devops_servers
+  become: true
+
+  tasks:
+
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      apt:
+        name:
+          - git
+          - curl
+          - wget
+          - unzip
+          - python3
+          - python3-pip
+        state: present
+
+    - name: Verify server connectivity
+      command: hostname
+      register: hostname_output
+      changed_when: false
+
+    - name: Display server hostname
+      debug:
+        msg: "Connected to {{ hostname_output.stdout }}"

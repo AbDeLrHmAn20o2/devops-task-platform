@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         IMAGE_NAME = "devops-task-platform-backend"
-        IMAGE_TAG = "ci"
+        IMAGE_TAG  = "ci"
         TEST_IMAGE = "devops-task-platform-test:ci"
         KUBECONFIG = "/var/jenkins_home/kubeconfig"
     }
@@ -16,9 +16,77 @@ pipeline {
             }
         }
 
+        stage('Terraform Validate') {
+            steps {
+                sh '''
+                    echo "=== Terraform Validate ==="
+
+                    cd terraform
+
+                    terraform fmt -check
+                    terraform init -backend=false
+                    terraform validate
+
+                    echo "=== Terraform configuration is valid ==="
+                '''
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                sh '''
+                    echo "=== Terraform Plan ==="
+
+                    cd terraform
+
+                    if [ ! -f terraform.tfvars ]; then
+                        echo "terraform.tfvars not found."
+                        echo "Creating temporary CI variables."
+
+                        cat > terraform.tfvars <<EOF
+aws_region          = "us-east-1"
+project_name        = "devops-task-platform"
+environment         = "ci"
+vpc_cidr            = "10.0.0.0/16"
+public_subnet_cidr  = "10.0.1.0/24"
+private_subnet_cidr = "10.0.2.0/24"
+availability_zone   = "us-east-1a"
+ami_id              = "ami-00000000000000000"
+instance_type       = "t2.micro"
+key_name            = "ci-placeholder"
+admin_cidr          = "127.0.0.1/32"
+EOF
+                    fi
+
+                    terraform plan -input=false
+
+                    echo "=== Terraform Plan completed ==="
+                '''
+            }
+        }
+
+        stage('Ansible Syntax Check') {
+            steps {
+                sh '''
+                    echo "=== Ansible Syntax Check ==="
+
+                    cd ansible
+
+                    ANSIBLE_CONFIG=$PWD/ansible.cfg \
+                    ansible-playbook \
+                    --syntax-check \
+                    playbooks/setup.yml
+
+                    echo "=== Ansible syntax is valid ==="
+                '''
+            }
+        }
+
         stage('Build Test Image') {
             steps {
                 sh '''
+                    echo "=== Building Test Image ==="
+
                     docker build \
                       -t ${TEST_IMAGE} \
                       ./app/backend
@@ -61,16 +129,21 @@ pipeline {
                     POSTGRES_READY=false
 
                     for i in $(seq 1 30); do
-                        if docker exec ci-postgres pg_isready \
+
+                        if docker exec ci-postgres \
+                            pg_isready \
                             -U devopsuser \
                             -d devopsdb > /dev/null 2>&1; then
 
                             echo "PostgreSQL is ready"
+
                             POSTGRES_READY=true
+
                             break
                         fi
 
                         echo "Waiting for PostgreSQL... attempt $i/30"
+
                         sleep 2
                     done
 
@@ -111,9 +184,15 @@ pipeline {
         stage('Build Production Image') {
             steps {
                 sh '''
+                    echo "=== Building Production Image ==="
+
                     docker build \
                       -t ${IMAGE_NAME}:${IMAGE_TAG} \
                       ./app/backend
+
+                    echo "=== Production image built ==="
+
+                    docker images ${IMAGE_NAME}:${IMAGE_TAG}
                 '''
             }
         }
@@ -123,7 +202,8 @@ pipeline {
                 sh '''
                     echo "=== Checking image in Minikube ==="
 
-                    docker exec minikube crictl images | grep ${IMAGE_NAME} || true
+                    docker exec minikube crictl images | \
+                      grep ${IMAGE_NAME} || true
                 '''
             }
         }
@@ -133,17 +213,17 @@ pipeline {
                 sh '''
                     echo "=== Deploying PostgreSQL ==="
 
-                    kubectl --kubeconfig=${KUBECONFIG} apply \
-                      -f k8s/postgres-secret.yaml
+                    kubectl --kubeconfig=${KUBECONFIG} \
+                      apply -f k8s/postgres-secret.yaml
 
-                    kubectl --kubeconfig=${KUBECONFIG} apply \
-                      -f k8s/postgres-pvc.yaml
+                    kubectl --kubeconfig=${KUBECONFIG} \
+                      apply -f k8s/postgres-pvc.yaml
 
-                    kubectl --kubeconfig=${KUBECONFIG} apply \
-                      -f k8s/postgres-deployment.yaml
+                    kubectl --kubeconfig=${KUBECONFIG} \
+                      apply -f k8s/postgres-deployment.yaml
 
-                    kubectl --kubeconfig=${KUBECONFIG} apply \
-                      -f k8s/postgres-service.yaml
+                    kubectl --kubeconfig=${KUBECONFIG} \
+                      apply -f k8s/postgres-service.yaml
                 '''
             }
         }
@@ -153,11 +233,11 @@ pipeline {
                 sh '''
                     echo "=== Deploying Backend ==="
 
-                    kubectl --kubeconfig=${KUBECONFIG} apply \
-                      -f k8s/backend-deployment.yaml
+                    kubectl --kubeconfig=${KUBECONFIG} \
+                      apply -f k8s/backend-deployment.yaml
 
-                    kubectl --kubeconfig=${KUBECONFIG} apply \
-                      -f k8s/backend-service.yaml
+                    kubectl --kubeconfig=${KUBECONFIG} \
+                      apply -f k8s/backend-service.yaml
                 '''
             }
         }
@@ -167,23 +247,25 @@ pipeline {
                 sh '''
                     echo "=== Waiting for PostgreSQL rollout ==="
 
-                    kubectl --kubeconfig=${KUBECONFIG} rollout status \
-                      deployment/postgres \
+                    kubectl --kubeconfig=${KUBECONFIG} \
+                      rollout status deployment/postgres \
                       --timeout=120s
 
                     echo "=== Waiting for Backend rollout ==="
 
-                    kubectl --kubeconfig=${KUBECONFIG} rollout status \
-                      deployment/backend \
+                    kubectl --kubeconfig=${KUBECONFIG} \
+                      rollout status deployment/backend \
                       --timeout=120s
 
                     echo "=== Kubernetes Pods ==="
 
-                    kubectl --kubeconfig=${KUBECONFIG} get pods
+                    kubectl --kubeconfig=${KUBECONFIG} \
+                      get pods
 
                     echo "=== Kubernetes Services ==="
 
-                    kubectl --kubeconfig=${KUBECONFIG} get services
+                    kubectl --kubeconfig=${KUBECONFIG} \
+                      get services
                 '''
             }
         }
@@ -193,12 +275,14 @@ pipeline {
                 sh '''
                     echo "=== Backend Health Check ==="
 
-                    kubectl --kubeconfig=${KUBECONFIG} exec deployment/backend -- \
+                    kubectl --kubeconfig=${KUBECONFIG} \
+                      exec deployment/backend -- \
                       python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:5000/health').read().decode())"
 
                     echo "=== Database Health Check ==="
 
-                    kubectl --kubeconfig=${KUBECONFIG} exec deployment/backend -- \
+                    kubectl --kubeconfig=${KUBECONFIG} \
+                      exec deployment/backend -- \
                       python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:5000/db-health').read().decode())"
                 '''
             }
@@ -212,6 +296,10 @@ pipeline {
 
         failure {
             echo 'CI/CD Pipeline failed.'
+        }
+
+        always {
+            echo 'Pipeline execution finished.'
         }
     }
 }

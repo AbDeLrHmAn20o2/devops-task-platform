@@ -1,0 +1,13 @@
+aws_region          = "us-east-1"
+project_name        = "devops-task-platform"
+environment         = "dev"
+vpc_cidr            = "10.0.0.0/16"
+public_subnet_cidr  = "10.0.1.0/24"
+private_subnet_cidr = "10.0.2.0/24"
+availability_zone   = "us-east-1a"
+
+ami_id        = "REPLACE_WITH_AMI_ID"
+instance_type = "t2.micro"
+key_name      = "REPLACE_WITH_KEY_NAME"
+
+admin_cidr = "YOUR_PUBLIC_IP/32"

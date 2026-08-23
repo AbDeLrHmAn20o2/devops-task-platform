@@ -42,67 +42,86 @@ stages {
         }
     }
 
-    stage('Terraform Validate') {
-        steps {
-            sh '''
-                set -e
+stage('Terraform Validate') {
+steps {
+sh '''
+set -e
 
-                echo "========================================"
-                echo "        Terraform Format Check"
-                echo "========================================"
+```
+        echo "========================================"
+        echo "        Terraform Format Check"
+        echo "========================================"
 
-                docker run --rm \
-                  --mount type=bind,source="$WORKSPACE/terraform",target=/workspace \
-                  -w /workspace \
-                  ${TERRAFORM_IMAGE} \
-                  fmt -check
+        JENKINS_CONTAINER=$(hostname)
 
-                echo "========================================"
-                echo "        Terraform Validate"
-                echo "========================================"
+        echo "Jenkins container: $JENKINS_CONTAINER"
 
-                docker run --rm \
-                  --mount type=bind,source="$WORKSPACE/terraform",target=/workspace \
-                  -w /workspace \
-                  ${TERRAFORM_IMAGE} \
-                  init -backend=false
+        docker run --rm \
+          --volumes-from "$JENKINS_CONTAINER" \
+          -w "$WORKSPACE/terraform" \
+          hashicorp/terraform:latest \
+          fmt -check
 
-                docker run --rm \
-                  --mount type=bind,source="$WORKSPACE/terraform",target=/workspace \
-                  -w /workspace \
-                  ${TERRAFORM_IMAGE} \
-                  validate
+        echo "========================================"
+        echo "        Terraform Init"
+        echo "========================================"
 
-                echo "Terraform validation completed successfully."
-            '''
-        }
-    }
+        docker run --rm \
+          --volumes-from "$JENKINS_CONTAINER" \
+          -w "$WORKSPACE/terraform" \
+          hashicorp/terraform:latest \
+          init -backend=false
 
-    stage('Terraform Plan') {
-        steps {
-            sh '''
-                set -e
+        echo "========================================"
+        echo "        Terraform Validate"
+        echo "========================================"
 
-                echo "========================================"
-                echo "        Terraform Plan"
-                echo "========================================"
+        docker run --rm \
+          --volumes-from "$JENKINS_CONTAINER" \
+          -w "$WORKSPACE/terraform" \
+          hashicorp/terraform:latest \
+          validate
 
-                docker run --rm \
-                  --mount type=bind,source="$WORKSPACE/terraform",target=/workspace \
-                  -w /workspace \
-                  ${TERRAFORM_IMAGE} \
-                  init -backend=false
+        echo "Terraform validation completed successfully."
+    '''
+}
+```
 
-                docker run --rm \
-                  --mount type=bind,source="$WORKSPACE/terraform",target=/workspace \
-                  -w /workspace \
-                  ${TERRAFORM_IMAGE} \
-                  plan
+}
 
-                echo "Terraform plan completed successfully."
-            '''
-        }
-    }
+stage('Terraform Plan') {
+steps {
+sh '''
+set -e
+
+```
+        echo "========================================"
+        echo "        Terraform Plan"
+        echo "========================================"
+
+        JENKINS_CONTAINER=$(hostname)
+
+        echo "Jenkins container: $JENKINS_CONTAINER"
+
+        docker run --rm \
+          --volumes-from "$JENKINS_CONTAINER" \
+          -w "$WORKSPACE/terraform" \
+          hashicorp/terraform:latest \
+          init -backend=false
+
+        docker run --rm \
+          --volumes-from "$JENKINS_CONTAINER" \
+          -w "$WORKSPACE/terraform" \
+          hashicorp/terraform:latest \
+          plan
+
+        echo "Terraform plan completed successfully."
+    '''
+}
+```
+
+}
+
 
     stage('Ansible Syntax Check') {
         steps {

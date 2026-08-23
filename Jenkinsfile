@@ -28,81 +28,75 @@ pipeline {
         }
 
         stage('Run Tests') {
-            steps {
-                sh '''
-                    set -e
+    steps {
+        sh '''
+            set -e
 
-                    docker network rm ci-network 2>/dev/null || true
-                    docker network create ci-network
-
-                    docker rm -f ci-postgres 2>/dev/null || true
-
-                    docker run -d \
-                      --name ci-postgres \
-                      --network ci-network \
-                      -e POSTGRES_DB=devopsdb \
-                      -e POSTGRES_USER=devopsuser \
-                      -e POSTGRES_PASSWORD=devopspassword \
-                      postgres:16-alpine
-
-                    echo "Waiting for PostgreSQL..."
-
-                    for i in $(seq 1 30); do
-                        if docker exec ci-postgres pg_isready \
-                            -U devopsuser \
-                            -d devopsdb > /dev/null 2>&1; then
-                            echo "PostgreSQL is ready"
-                            break
-                        fi
-
-                        if [ "$i" -eq 30 ]; then
-                            echo "PostgreSQL failed to become ready"
-                            docker logs ci-postgres
-                            exit 1
-                        fi
-
-                        sleep 2
-                    done
-
-                    echo "Testing database DNS..."
-
-                    docker run --rm \
-                      --network ci-network \
-                      postgres:16-alpine \
-                      pg_isready \
-                      -h ci-postgres \
-                      -p 5432 \
-                      -U devopsuser \
-                      -d devopsdb
-
-                    echo "Running pytest..."
-
-                    docker run --rm \
-                      --network ci-network \
-                      -e DB_HOST=ci-postgres \
-                      -e DB_PORT=5432 \
-                      -e DB_NAME=devopsdb \
-                      -e DB_USER=devopsuser \
-                      -e DB_PASSWORD=devopspassword \
-                      ${TEST_IMAGE} \
-                      python -m pytest
-
-                    echo "Tests completed successfully"
-
-                    docker rm -f ci-postgres
-                    docker network rm ci-network
-                '''
+            cleanup() {
+                echo "=== Cleaning CI resources ==="
+                docker rm -f ci-postgres 2>/dev/null || true
+                docker network rm ci-network 2>/dev/null || true
             }
 
-            post {
-                always {
-                    sh '''
-                        docker rm -f ci-postgres 2>/dev/null || true
-                        docker network rm ci-network 2>/dev/null || true
-                    '''
-                }
-            }
-        }
+            trap cleanup EXIT
+
+            docker rm -f ci-postgres 2>/dev/null || true
+            docker network rm ci-network 2>/dev/null || true
+
+            echo "=== Creating CI network ==="
+
+            docker network create ci-network
+
+            echo "=== Starting PostgreSQL ==="
+
+            docker run -d \
+              --name ci-postgres \
+              --network ci-network \
+              -e POSTGRES_DB=devopsdb \
+              -e POSTGRES_USER=devopsuser \
+              -e POSTGRES_PASSWORD=devopspassword \
+              postgres:16-alpine
+
+            echo "=== Waiting for PostgreSQL ==="
+
+            for i in $(seq 1 30); do
+                if docker exec ci-postgres pg_isready \
+                    -U devopsuser \
+                    -d devopsdb > /dev/null 2>&1; then
+                    echo "PostgreSQL is ready"
+                    break
+                fi
+
+                echo "Waiting for PostgreSQL... attempt $i/30"
+                sleep 2
+            done
+
+            echo "=== Testing PostgreSQL DNS ==="
+
+            docker run --rm \
+              --network ci-network \
+              postgres:16-alpine \
+              pg_isready \
+              -h ci-postgres \
+              -U devopsuser \
+              -d devopsdb
+
+            echo "=== Running pytest ==="
+
+            docker run --rm \
+              --network ci-network \
+              -e DB_HOST=ci-postgres \
+              -e DB_PORT=5432 \
+              -e DB_NAME=devopsdb \
+              -e DB_USER=devopsuser \
+              -e DB_PASSWORD=devopspassword \
+              devops-task-platform-test:ci \
+              python -m pytest
+
+            echo "=== Tests passed ==="
+        '''
+    }
+}
 
         stage('Build Production Image') {
             steps {

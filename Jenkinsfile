@@ -27,10 +27,14 @@ pipeline {
 stage('Run Tests') {
     steps {
         sh '''
+            docker network rm ci-network 2>/dev/null || true
+            docker network create ci-network
+
             docker rm -f ci-postgres 2>/dev/null || true
 
             docker run -d \
               --name ci-postgres \
+              --network ci-network \
               -e POSTGRES_DB=devopsdb \
               -e POSTGRES_USER=devopsuser \
               -e POSTGRES_PASSWORD=devopspassword \
@@ -49,8 +53,8 @@ stage('Run Tests') {
             done
 
             docker run --rm \
-              --link ci-postgres:devops-database \
-              -e DB_HOST=devops-database \
+              --network ci-network \
+              -e DB_HOST=ci-postgres \
               -e DB_PORT=5432 \
               -e DB_NAME=devopsdb \
               -e DB_USER=devopsuser \
@@ -59,6 +63,7 @@ stage('Run Tests') {
               python -m pytest
 
             docker rm -f ci-postgres
+            docker network rm ci-network
         '''
     }
 }

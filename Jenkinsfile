@@ -41,11 +41,10 @@ stage('Run Tests') {
             for i in $(seq 1 30); do
                 if docker exec ci-postgres pg_isready \
                     -U devopsuser \
-                    -d devopsdb >/dev/null 2>&1; then
+                    -d devopsdb > /dev/null 2>&1; then
                     echo "PostgreSQL is ready"
                     break
                 fi
-
                 sleep 2
             done
 

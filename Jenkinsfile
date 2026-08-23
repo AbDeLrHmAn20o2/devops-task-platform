@@ -17,70 +17,63 @@ pipeline {
         }
 
         stage('Terraform Validate') {
-            steps {
-                sh '''
-                    echo "=== Terraform Validate ==="
+    steps {
+        sh '''
+            echo "=== Terraform Validate ==="
 
-                    cd terraform
+            docker run --rm \
+              -v "$PWD/terraform:/workspace" \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -w /workspace \
+              hashicorp/terraform:latest \
+              fmt -check
 
-                    terraform fmt -check
-                    terraform init -backend=false
-                    terraform validate
+            docker run --rm \
+              -v "$PWD/terraform:/workspace" \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -w /workspace \
+              hashicorp/terraform:latest \
+              init -backend=false
 
-                    echo "=== Terraform configuration is valid ==="
-                '''
-            }
-        }
+            docker run --rm \
+              -v "$PWD/terraform:/workspace" \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -w /workspace \
+              hashicorp/terraform:latest \
+              validate
+        '''
+    }
+}
 
-        stage('Terraform Plan') {
-            steps {
-                sh '''
-                    echo "=== Terraform Plan ==="
+stage('Terraform Plan') {
+    steps {
+        sh '''
+            echo "=== Terraform Plan ==="
 
-                    cd terraform
+            docker run --rm \
+              -v "$PWD/terraform:/workspace" \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -w /workspace \
+              hashicorp/terraform:latest \
+              plan
+        '''
+    }
+}
 
-                    if [ ! -f terraform.tfvars ]; then
-                        echo "terraform.tfvars not found."
-                        echo "Creating temporary CI variables."
 
-                        cat > terraform.tfvars <<EOF
-aws_region          = "us-east-1"
-project_name        = "devops-task-platform"
-environment         = "ci"
-vpc_cidr            = "10.0.0.0/16"
-public_subnet_cidr  = "10.0.1.0/24"
-private_subnet_cidr = "10.0.2.0/24"
-availability_zone   = "us-east-1a"
-ami_id              = "ami-00000000000000000"
-instance_type       = "t2.micro"
-key_name            = "ci-placeholder"
-admin_cidr          = "127.0.0.1/32"
-EOF
-                    fi
+stage('Ansible Syntax Check') {
+    steps {
+        sh '''
+            echo "=== Ansible Syntax Check ==="
 
-                    terraform plan -input=false
-
-                    echo "=== Terraform Plan completed ==="
-                '''
-            }
-        }
-
-        stage('Ansible Syntax Check') {
-            steps {
-                sh '''
-                    echo "=== Ansible Syntax Check ==="
-
-                    cd ansible
-
-                    ANSIBLE_CONFIG=$PWD/ansible.cfg \
-                    ansible-playbook \
-                    --syntax-check \
-                    playbooks/setup.yml
-
-                    echo "=== Ansible syntax is valid ==="
-                '''
-            }
-        }
+            docker run --rm \
+              -v "$PWD/ansible:/workspace" \
+              -w /workspace \
+              cytopia/ansible:latest \
+              ansible-playbook --syntax-check playbooks/setup.yml
+        '''
+    }
+}
 
         stage('Build Test Image') {
             steps {

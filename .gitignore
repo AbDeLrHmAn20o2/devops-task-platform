@@ -20,3 +20,12 @@ instance/
 # OS
 .DS_Store
 Thumbs.db
+
+
+# terraform
+terraform/.terraform/
+terraform/terraform.tfstate
+terraform/terraform.tfstate.*
+terraform/*.tfvars
+terraform/*.tfvars.json
+terraform/.terraform.lock.hcl
